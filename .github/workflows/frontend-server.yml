@@ -1,0 +1,144 @@
+name: Frontend Server With Requests
+
+on:
+  push:
+    paths:
+      - "src/**"
+      - "public/**"
+      - "package.json"
+      - "package-lock.json"
+      - "next.config.mjs"
+      - "tailwind.config.ts"
+      - "tsconfig.json"
+      - ".github/workflows/frontend-server.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "public/**"
+      - "package.json"
+      - "package-lock.json"
+      - "next.config.mjs"
+      - "tailwind.config.ts"
+      - "tsconfig.json"
+      - ".github/workflows/frontend-server.yml"
+  workflow_dispatch:
+    inputs:
+      request_method:
+        description: "HTTP method for custom request"
+        required: false
+        default: "GET"
+        type: choice
+        options:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+      request_path:
+        description: "Request path starting with /, for example /"
+        required: false
+        default: "/"
+      request_body:
+        description: "Optional JSON body for POST/PUT/PATCH"
+        required: false
+        default: ""
+      keep_alive_minutes:
+        description: "Keep frontend server alive after request (minutes, 0 to disable)"
+        required: false
+        default: "0"
+
+jobs:
+  run-frontend-server:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PORT: ${{ vars.NEXT_PORT || '3000' }}
+      NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:8080' }}
+      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID || secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '' }}
+      NEXT_PUBLIC_SOCIAL_ENABLED: ${{ vars.NEXT_PUBLIC_SOCIAL_ENABLED || 'true' }}
+      NEXT_PUBLIC_SOCIAL_DRAFT_ENABLED: ${{ vars.NEXT_PUBLIC_SOCIAL_DRAFT_ENABLED || 'false' }}
+      CUSTOM_REQUEST_METHOD: ${{ inputs.request_method || 'GET' }}
+      CUSTOM_REQUEST_PATH: ${{ inputs.request_path || '/' }}
+      CUSTOM_REQUEST_BODY: ${{ inputs.request_body || '' }}
+      KEEP_ALIVE_MINUTES: ${{ inputs.keep_alive_minutes || '0' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ vars.NODE_VERSION || '20' }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build app
+        run: npm run build
+
+      - name: Start frontend server and send requests
+        run: |
+          npm run start -- --hostname 127.0.0.1 --port "${NEXT_PORT}" > next-server.log 2>&1 &
+          APP_PID=$!
+
+          cleanup() {
+            kill "$APP_PID" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          SERVER_READY="false"
+          for i in {1..60}; do
+            if curl -fsS "http://127.0.0.1:${NEXT_PORT}/" >/dev/null; then
+              echo "Frontend server is up."
+              SERVER_READY="true"
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${SERVER_READY}" != "true" ]; then
+            echo "Frontend did not start in time. Last logs:"
+            tail -n 200 next-server.log || true
+            exit 1
+          fi
+
+          TARGET_URL="http://127.0.0.1:${NEXT_PORT}${CUSTOM_REQUEST_PATH}"
+          echo "Sending ${CUSTOM_REQUEST_METHOD} ${TARGET_URL}"
+
+          if [ -n "${CUSTOM_REQUEST_BODY}" ]; then
+            RESPONSE=$(
+              curl -sS -w '\n%{http_code}' \
+                -X "${CUSTOM_REQUEST_METHOD}" \
+                -H "Content-Type: application/json" \
+                --data "${CUSTOM_REQUEST_BODY}" \
+                "${TARGET_URL}"
+            )
+          else
+            RESPONSE=$(
+              curl -sS -w '\n%{http_code}' \
+                -X "${CUSTOM_REQUEST_METHOD}" \
+                "${TARGET_URL}"
+            )
+          fi
+
+          HTTP_STATUS="$(echo "${RESPONSE}" | tail -n1)"
+          RESPONSE_BODY="$(echo "${RESPONSE}" | sed '$d')"
+
+          echo "Custom request status: ${HTTP_STATUS}"
+          echo "Custom request body:"
+          echo "${RESPONSE_BODY}"
+
+          if [ "${KEEP_ALIVE_MINUTES}" != "0" ]; then
+            echo "Keeping frontend server alive for ${KEEP_ALIVE_MINUTES} minute(s)..."
+            sleep "$((KEEP_ALIVE_MINUTES * 60))"
+          fi
+
+      - name: Upload frontend logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-server-log
+          path: next-server.log
+          if-no-files-found: ignore
