@@ -1,6 +1,5 @@
 .next
 node_modules
 coverage
-.env.loca
-.env
+.env*
 .DS_Store

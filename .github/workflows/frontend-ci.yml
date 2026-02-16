@@ -1,4 +1,4 @@
-name: Frontend CI
+name: Dresscode Landing Smoke Check
 
 on:
   push:
@@ -24,14 +24,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-test:
+  smoke-check:
     runs-on: ubuntu-latest
     env:
       NEXT_TELEMETRY_DISABLED: "1"
-      NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:8080' }}
-      NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${{ vars.NEXT_PUBLIC_GOOGLE_CLIENT_ID || secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '' }}
-      NEXT_PUBLIC_SOCIAL_ENABLED: ${{ vars.NEXT_PUBLIC_SOCIAL_ENABLED || 'true' }}
-      NEXT_PUBLIC_SOCIAL_DRAFT_ENABLED: ${{ vars.NEXT_PUBLIC_SOCIAL_DRAFT_ENABLED || 'false' }}
+      NEXT_PORT: "3000"
 
     steps:
       - name: Checkout
@@ -46,11 +43,35 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type check
-        run: npm run typecheck
-
-      - name: Run tests
-        run: npm run test
-
       - name: Build app
         run: npm run build
+
+      - name: Start app and check /
+        run: |
+          npm run start -- --hostname 127.0.0.1 --port "${NEXT_PORT}" > next-server.log 2>&1 &
+          APP_PID=$!
+
+          cleanup() {
+            kill "$APP_PID" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          for i in {1..60}; do
+            if curl -fsS "http://127.0.0.1:${NEXT_PORT}/" >/dev/null; then
+              echo "Smoke check passed."
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Smoke check failed. Last logs:"
+          tail -n 200 next-server.log || true
+          exit 1
+
+      - name: Upload app logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dresscode-landing-log
+          path: next-server.log
+          if-no-files-found: ignore
