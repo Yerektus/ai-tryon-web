@@ -9,7 +9,7 @@ export function Features() {
         <div className="mx-auto max-w-5xl text-center">
           <h2 className="font-display text-4xl font-bold leading-tight tracking-[0.02em] text-white md:text-6xl md:tracking-[0.03em]">
             <span className="block">
-              AI TRYON <span className="text-higgs-text-muted">это</span>{" "}
+              DRESSCODE <span className="text-higgs-text-muted">это</span>{" "}
               <span className="inline-flex whitespace-nowrap rounded-full border border-[#4e4a72] bg-[#2f2c49] px-4 py-1.5 text-[#ddd7ff] md:px-6 md:py-2">
                 социальная сеть
               </span>

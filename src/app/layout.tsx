@@ -14,7 +14,7 @@ const sora = Sora({
 });
 
 export const metadata: Metadata = {
-  title: "AI Try-On",
+  title: "Dresscode Landing",
   description: "Виртуальная примерка одежды с AI"
 };
 
